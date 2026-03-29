@@ -3,7 +3,7 @@
 from flask import Flask, request, send_file, render_template_string
 import tempfile
 import os
-from pdf_to_txt import extract_text, fix_hard_line_breaks
+from pdf_to_txt import smart_extract, fix_hard_line_breaks
 
 app = Flask(__name__)
 
@@ -132,7 +132,7 @@ def convert():
         file.save(tmp_pdf.name)
         tmp_pdf.close()
 
-        raw = extract_text(tmp_pdf.name)
+        raw = smart_extract(tmp_pdf.name)
         result = fix_hard_line_breaks(raw)
 
         tmp_txt = tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8")

@@ -1,4 +1,4 @@
-"""PDF to TXT converter with Chinese hard line-break fixing."""
+"""PDF to TXT converter with Chinese hard line-break fixing and OCR fallback."""
 
 import argparse
 import re
@@ -7,6 +7,9 @@ import pdfplumber
 
 # 中文句末标点（遇到这些结尾保留换行，视为段落结束）
 SENTENCE_END_PUNCTUATION = set("。！？；：…""）》】」』!?;:")
+
+# 每页平均少于此字符数时，判定为扫描版，启用 OCR
+OCR_THRESHOLD = 10
 
 
 def extract_text(pdf_path: str) -> str:
@@ -18,6 +21,43 @@ def extract_text(pdf_path: str) -> str:
             if text:
                 pages_text.append(text)
     return "\n".join(pages_text)
+
+
+def extract_text_ocr(pdf_path: str) -> str:
+    """OCR 回退：用 PyMuPDF 渲染页面，再用 RapidOCR 识别文字。"""
+    import fitz  # PyMuPDF
+    from rapidocr_onnxruntime import RapidOCR
+
+    ocr = RapidOCR()
+    pages_text = []
+    doc = fitz.open(pdf_path)
+    total = len(doc)
+    for i, page in enumerate(doc):
+        print(f"\rOCR 识别中... {i + 1}/{total}", end="", flush=True)
+        pix = page.get_pixmap(dpi=300)
+        img_bytes = pix.tobytes("png")
+        result, _ = ocr(img_bytes)
+        if result:
+            lines = [line[1] for line in result]
+            pages_text.append("\n".join(lines))
+    doc.close()
+    print()  # 换行
+    return "\n".join(pages_text)
+
+
+def smart_extract(pdf_path: str) -> str:
+    """先尝试文字提取，若为扫描版则自动切换 OCR。"""
+    with pdfplumber.open(pdf_path) as pdf:
+        num_pages = len(pdf.pages)
+
+    raw = extract_text(pdf_path)
+    avg_chars = len(raw.strip()) / max(num_pages, 1)
+
+    if avg_chars >= OCR_THRESHOLD:
+        return raw
+
+    print(f"检测到扫描版 PDF（{num_pages} 页，平均 {avg_chars:.0f} 字符/页），启用 OCR...")
+    return extract_text_ocr(pdf_path)
 
 
 def fix_hard_line_breaks(raw_text: str) -> str:
@@ -67,7 +107,7 @@ def fix_hard_line_breaks(raw_text: str) -> str:
 
 
 def convert(pdf_path: str, txt_path: str) -> None:
-    raw = extract_text(pdf_path)
+    raw = smart_extract(pdf_path)
     result = fix_hard_line_breaks(raw)
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(result)
